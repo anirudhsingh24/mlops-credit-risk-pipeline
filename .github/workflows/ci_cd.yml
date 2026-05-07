@@ -1,0 +1,76 @@
+name: MLOps CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-train-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. checkout code ──────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. set up Python ──────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. install dependencies ───────────────────────────
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ── 4. run unit tests ─────────────────────────────────
+      - name: Run unit tests
+        run: |
+          cd tests
+          pytest test_features.py -v --tb=short
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+
+      # ── 5. train model ────────────────────────────────────
+      # Note: In real CI you'd download fresh data from S3/GCS here
+      - name: Train model
+        run: python src/train.py
+        env:
+          MLFLOW_TRACKING_URI: sqlite:///mlflow.db
+
+      # ── 6. evaluate and gate ──────────────────────────────
+      # This step exits with code 1 if AUC is below threshold
+      # or if new model doesn't improve over production.
+      # The pipeline blocks here — nothing gets deployed.
+      - name: Evaluate model (quality gate)
+        run: python src/evaluate.py
+        env:
+          MLFLOW_TRACKING_URI: sqlite:///mlflow.db
+
+      # ── 7. build Docker image ─────────────────────────────
+      - name: Build Docker image
+        run: |
+          docker build -t mlops-pipeline:${{ github.sha }} .
+          docker tag mlops-pipeline:${{ github.sha }} mlops-pipeline:latest
+
+      # ── 8. push to Docker Hub (only on main branch push) ──
+      # Uncomment and add DOCKERHUB_USERNAME / DOCKERHUB_TOKEN
+      # as repository secrets to enable this step.
+      #
+      # - name: Push to Docker Hub
+      #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      #   run: |
+      #     echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+      #     docker push mlops-pipeline:${{ github.sha }}
+      #     docker push mlops-pipeline:latest
+
+      # ── 9. upload artifacts ───────────────────────────────
+      - name: Upload metrics artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-metrics-${{ github.sha }}
+          path: artifacts/
+          retention-days: 30
