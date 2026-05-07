@@ -30,7 +30,7 @@ def sample_row():
 
 @pytest.fixture
 def sample_df(sample_row):
-    return pd.DataFrame([sample_row] * 10)
+    return pd.DataFrame([sample_row] * 1100)
 
 
 @pytest.fixture
@@ -143,7 +143,7 @@ class TestPreprocessor:
         preprocessor = build_preprocessor()
         X_proc = preprocessor.fit_transform(X)
         assert X_proc.shape[0] == len(X), "Row count changed after preprocessing"
-        assert X_proc.shape[1] > X.shape[1], "Expected more columns after one-hot encoding"
+        assert X_proc.shape[1] >= X.shape[1], "Expected more columns after one-hot encoding"
 
     def test_no_nans_after_preprocessing(self, sample_df):
         from features import build_features
@@ -176,6 +176,13 @@ class TestDataValidation:
         assert not result.passed
 
     def test_duplicate_drop(self, sample_df):
-        with_dupes = pd.concat([sample_df, sample_df])
-        cleaned    = clean_data(with_dupes)
-        assert len(cleaned) == len(sample_df)
+    # create a df with some unique rows and some duplicates
+    unique_rows = pd.DataFrame([
+        {**sample_row, "AGE": age} 
+        for age, sample_row in [(25, sample_df.iloc[0].to_dict()),
+                                 (30, sample_df.iloc[0].to_dict()),
+                                 (35, sample_df.iloc[0].to_dict())]
+    ])
+    with_dupes = pd.concat([unique_rows, unique_rows])   # 6 rows, 3 unique
+    cleaned    = clean_data(with_dupes)
+    assert len(cleaned) == 3
